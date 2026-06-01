@@ -51,6 +51,7 @@ class AckBuffer {
     this.onLine = onLine || (() => {});
     this.history = [];
     this.lastLineAt = performance.now();
+    this.count = 0; // total notification lines received (telemetry + acks)
   }
 
   // ms since the last notification line of ANY kind (including telemetry).
@@ -68,6 +69,7 @@ class AckBuffer {
       const line = raw.replace(/\r$/, '').trim();
       if (!line) continue;
       this.lastLineAt = performance.now();
+      this.count += 1;
       this.history.push(line);
       // Only surface/match protocol acks. The robot streams a flood of
       // telemetry (IMU/SNS/MTR_FB) that would bury the log and never matches a
@@ -127,8 +129,12 @@ export class Connection {
     this.rx = await svc.getCharacteristic(RX_UUID);
     this.tx = await svc.getCharacteristic(TX_UUID);
     this._onNotify = (e) => this.ack.feed(e.target.value);
-    await this.tx.startNotifications();
+    // Add the listener BEFORE enabling notifications so we don't miss the first
+    // ones, then give the stack a beat — Windows/WinRT can drop early
+    // notifications if you write commands immediately after startNotifications().
     this.tx.addEventListener('characteristicvaluechanged', this._onNotify);
+    await this.tx.startNotifications();
+    await sleep(400);
     this._writeWithResponse = typeof this.rx.writeValueWithResponse === 'function';
     this.connected = true;
   }
@@ -222,8 +228,10 @@ async function uploadOnce(conn, bytes, opts) {
   // BLE notify queue and drops the OK QUIET / PONG replies. Waiting for the ack
   // (like ble_put.py) is unreliable — instead resend QUIET until the notify
   // stream actually goes SILENT. This is the fix that unblocked the spike.
+  const startCount = conn.ack.count;
   let quiet = false;
   for (let i = 0; i < quietTries; i++) {
+    conn.ack.lastLineAt = performance.now(); // baseline this QUIET attempt
     await conn.sendLine('QUIET');
     const t0 = performance.now();
     while (performance.now() - t0 < quietProbeMs) {
@@ -235,7 +243,12 @@ async function uploadOnce(conn, bytes, opts) {
     }
     if (quiet) break;
   }
-  log(quiet ? '> QUIET — telemetry silent' : '> QUIET — stream did not quiet; continuing');
+  const seen = conn.ack.count - startCount;
+  log(`> QUIET — ${seen} notification(s) seen, stream ${quiet ? 'quiet' : 'still active'}`);
+  if (seen === 0) {
+    log('  ⚠ NO notifications received — TX notify is not delivering on this');
+    log('    platform/connection. PONG/acks can never arrive. (Not a "silence".)');
+  }
   if (delayMs) await sleep(delayMs);
 
   log('> PING');
