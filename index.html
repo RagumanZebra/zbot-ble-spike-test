@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Z-Bot · Web Bluetooth flashing spike (phase 2.8)</title>
+    <style>
+      :root {
+        --bg: #0f1115;
+        --panel: #181b22;
+        --border: #2a2f3a;
+        --fg: #e6e9ef;
+        --muted: #9aa3b2;
+        --accent: #4f9cf9;
+        --ok: #3fb950;
+        --bad: #f85149;
+        --warn: #d29922;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font: 14px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+      }
+      header {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border);
+      }
+      header h1 { margin: 0; font-size: 17px; }
+      header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+      main {
+        display: grid;
+        grid-template-columns: 360px 1fr;
+        gap: 16px;
+        padding: 16px 20px;
+        align-items: start;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px;
+      }
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+      }
+      label.field {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        margin: 6px 0;
+        color: var(--muted);
+      }
+      label.field input[type='number'] { width: 90px; }
+      input, textarea, button {
+        font: inherit;
+        color: var(--fg);
+        background: #11141a;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 8px;
+      }
+      textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+      button {
+        cursor: pointer;
+        background: #222733;
+      }
+      button.primary { background: var(--accent); color: #06203f; border-color: var(--accent); font-weight: 600; }
+      button:disabled { opacity: 0.45; cursor: not-allowed; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+      .status { font-size: 13px; color: var(--muted); margin-top: 8px; }
+      .status b { color: var(--fg); }
+      #log {
+        height: 280px;
+        overflow: auto;
+        background: #0b0d11;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 12px;
+        white-space: pre-wrap;
+        color: #c5ccd6;
+      }
+      .cards { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+      .card {
+        flex: 1 1 110px;
+        background: #11141a;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px 10px;
+      }
+      .card .k { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+      .card .v { font-size: 20px; font-weight: 600; margin-top: 2px; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+      th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+      .ok { color: var(--ok); }
+      .bad { color: var(--bad); }
+      .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-weight: 600; }
+      .badge.pass { background: rgba(63,185,80,0.15); color: var(--ok); }
+      .badge.fail { background: rgba(248,81,73,0.15); color: var(--bad); }
+      .badge.idle { background: #222733; color: var(--muted); }
+      .tablewrap { max-height: 300px; overflow: auto; }
+      details summary { cursor: pointer; color: var(--muted); }
+      code { background: #11141a; padding: 1px 5px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Z-Bot · Web Bluetooth flashing spike</h1>
+      <p>
+        Phase 2.8 — proves a browser can upload <code>user_main.py</code> to a
+        ZebraBot over Web Bluetooth, and measures how reliably. Throwaway harness.
+        Chrome/Edge over <code>localhost</code> only.
+      </p>
+    </header>
+
+    <main>
+      <!-- LEFT: controls -->
+      <section class="panel">
+        <h2>Connection</h2>
+        <div class="row">
+          <button id="btnConnect" class="primary">Connect</button>
+          <button id="btnDisconnect" disabled>Disconnect</button>
+        </div>
+        <label class="field">
+          <span>Filter by name (fallback)</span>
+          <input type="checkbox" id="nameFilter" />
+        </label>
+        <label class="field">
+          <span>Show all devices (debug)</span>
+          <input type="checkbox" id="acceptAll" />
+        </label>
+        <div class="status" id="connStatus">Not connected.</div>
+
+        <h2 style="margin-top:18px">Settings</h2>
+        <label class="field"><span>Chunk size (raw bytes)</span><input type="number" id="chunkSize" value="12" min="1" max="180" /></label>
+        <label class="field"><span>Write delay (ms)</span><input type="number" id="delayMs" value="20" min="0" max="500" /></label>
+        <label class="field"><span>Ack timeout (ms)</span><input type="number" id="ackTimeoutMs" value="8000" min="500" /></label>
+        <label class="field"><span>Max upload retries</span><input type="number" id="maxUploadRetries" value="2" min="0" max="10" /></label>
+        <label class="field"><span>Max reconnects</span><input type="number" id="maxReconnects" value="2" min="0" max="10" /></label>
+        <label class="field"><span>RESET after each upload</span><input type="checkbox" id="resetEach" checked /></label>
+
+        <h2 style="margin-top:18px">Run</h2>
+        <div class="row">
+          <button id="btnSingle" disabled>Single upload</button>
+        </div>
+        <label class="field"><span>Campaign runs</span><input type="number" id="runs" value="50" min="1" max="500" /></label>
+        <div class="row">
+          <button id="btnCampaign" disabled>Run campaign</button>
+          <button id="btnStop" disabled>Stop</button>
+        </div>
+
+        <h2 style="margin-top:18px">Payload (base = small)</h2>
+        <textarea id="payload" rows="8" spellcheck="false"></textarea>
+        <div class="status">medium ≈ 1&nbsp;KB, large ≈ 3&nbsp;KB are derived by padding.</div>
+      </section>
+
+      <!-- RIGHT: log + results -->
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <section class="panel">
+          <h2>Live log</h2>
+          <div id="log"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Results</h2>
+          <div class="cards" id="cards"></div>
+          <div class="tablewrap">
+            <table id="resultsTable">
+              <thead>
+                <tr>
+                  <th>#</th><th>payload</th><th>bytes</th><th>retries</th>
+                  <th>reconn</th><th>ms</th><th>ok</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Verdict</h2>
+          <label class="field" style="justify-content:flex-start; gap:12px">
+            <span>Pass threshold (% success)</span>
+            <input type="number" id="threshold" value="98" min="0" max="100" />
+            <span id="verdictBadge" class="badge idle">no data</span>
+          </label>
+          <label class="field" style="display:block">
+            <span>Friction notes (pairing prompts, disconnect recoveries, re-pick needs, laptop model, OS)</span>
+          </label>
+          <textarea id="notes" rows="4" placeholder="e.g. Dell Latitude 3440 / Win11 / Chrome 134 — one pairing prompt on first connect, none after; 2 runs needed a reconnect after RESET..."></textarea>
+          <div class="row">
+            <button id="btnCSV" disabled>Export CSV</button>
+            <button id="btnJSON" disabled>Export JSON</button>
+          </div>
+          <details style="margin-top:8px">
+            <summary>Where the verdict goes</summary>
+            <div class="status">
+              Record the go/no-go in
+              <code>plans/python-track/phase-2.8-ble-flashing-spike.md</code>:
+              reliable → proceed to 3.6 / 3.7; flaky → open a
+              <code>phase-X-electron-app.md</code> plan.
+            </div>
+          </details>
+        </section>
+      </div>
+    </main>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
